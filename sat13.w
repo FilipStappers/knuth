@@ -435,8 +435,8 @@ while (1) {
 if ((vars>>hbits)>=10) {
   fprintf(stderr,"There are "O"lld variables but only "O"d hash tables;\n",
      vars,1<<hbits);
-  while ((vars>>hbits)>=10) hbits++;
-  fprintf(stderr," maybe you should use command-line option h"O"d?\n",hbits);
+  for (h=hbits+1;(vars>>h)>=10;h++) ;
+  fprintf(stderr," maybe you should use command-line option h"O"d?\n",h);
 }
 clauses-=nullclauses;
 if (clauses==0) {
@@ -891,7 +891,7 @@ void print_clause(uint c) {
 @ Speaking of debugging, here's a routine to check if the redundant
 parts of our data structure have gone awry.
 
-@d sanity_checking 1 /* set this to 0 to avoid automatic sanity checks */
+@d sanity_checking 0 /* set this to 1 if you suspect a bug */
 
 @<Sub...@>=
 void sanity(int eptr) {
@@ -1077,8 +1077,8 @@ similar to what has worked in previous programs of this series.
 
 @<Set up the main data structures@>=
 @<Allocate |vmem| and |heap|@>;
-@<Initialize the heap@>;
-if (polarity_infile) @<Input the starting polarities@>;
+if (polarity_infile) @<Initialize the heap from a file@>@;
+else @<Initialize the heap randomly@>;
 @<Allocate the other main arrays@>;
 @<Copy all the temporary cells to the |mem| and |bmem| and |trail| arrays
    in proper format@>;
@@ -1093,7 +1093,7 @@ if (!vmem) {
   exit(-12);
 }
 bytes+=(vars+1)*sizeof(variable);
-for (k=1;k<=vars;k++) o,vmem[k].value=unset;
+for (k=1;k<=vars;k++) o,vmem[k].value=unset,vmem[k].tloc=-1;
 heap=(uint*)malloc(vars*sizeof(uint));
 if (!heap) {
   fprintf(stderr,"Oops, I can't allocate the heap array!\n");
@@ -1248,33 +1248,10 @@ for (jj=min_learned+2,j=binaries;j;j--) {
   ooo,k=lmem[bar(ll)].bimp_end,bmem[k]=l,lmem[bar(ll)].bimp_end=k+1;
 }
 
-@ Literals that occur in |polarity_infile| must be separated by whitespace,
-but they can appear on any number of lines. If the literal isn't in the
-hash table, we ignore it. (Perhaps a preprocessor has made this literal
-obsolete.)
-
-@<Input the starting polarities@>=
-{
-  while (1) {
-    register tmp_var *p;
-    if (fscanf(polarity_infile,""O"s",buf)!=1) break;
-    if (buf[0]=='~') i=j=1;
-    else i=j=0;
-    @<Put the variable name...@>;
-    for (p=hash[h];p;p=p->next)
-      if (p->name.lng==cur_tmp_var->name.lng) break;
-    if (p) {
-      v=p->serial+1;
-      o,vmem[v].oldval=i;
-    }
-  }
-}
-
 @ @<Copy all the temporary variable nodes to the |vmem| array...@>=
 for (c=vars; c; c--) {
   @<Move |cur_tmp_var| back...@>;
   o,vmem[c].name.lng=cur_tmp_var->name.lng;
-  o,vmem[c].activity=0.0;
   o,vmem[c].stamp=0;
 }
 
@@ -1695,26 +1672,66 @@ if (--hn) {
 @ At the very beginning, all activity scores are zero.
 We'll permute the variables randomly in |heap|, for the sake of variety.
 
-@<Initialize the heap@>=
-if (true_prob>=1.0) true_prob_thresh=0x80000000;
-else true_prob_thresh=(int)(true_prob*2147483648.0);
-for (k=1;k<=vars;k++) o,heap[k-1]=k;
-for (hn=vars;hn>1;) {
-  @<Set |h| to a random integer less than |hn|@>;
-  hn--;
-  if (h!=hn) {
-    o,k=heap[h];
-    ooo,heap[h]=heap[hn],heap[hn]=k;
+@<Initialize the heap randomly@>=
+{
+  if (true_prob>=1.0) true_prob_thresh=0x80000000;
+  else true_prob_thresh=(int)(true_prob*2147483648.0);
+  for (k=1;k<=vars;k++) o,heap[k-1]=k;
+  for (hn=vars;hn>1;) {
+    @<Set |h| to a random integer less than |hn|@>;
+    hn--;
+    if (h!=hn) {
+      o,k=heap[h];
+      ooo,heap[h]=heap[hn],heap[hn]=k;
+    }
   }
+  for (h=0;h<vars;h++) {
+    o,v=heap[h];
+    o,vmem[v].hloc=h;
+    if (true_prob_thresh && (mems+=4,gb_next_rand()<true_prob_thresh))
+      vmem[v].oldval=0;    
+    else vmem[v].oldval=1;
+    o,vmem[v].activity=0.0;
+  }
+  hn=vars;
 }
-for (h=0;h<vars;h++) {
-  o,v=heap[h];
-  o,vmem[v].hloc=h;
-  if (true_prob_thresh && (mems+=4,gb_next_rand()<true_prob_thresh))
-    vmem[v].oldval=0;    
-  else vmem[v].oldval=1;
+
+@ Literals that occur in |polarity_infile| must be separated by whitespace,
+but they can appear on any number of lines. If the literal isn't in the
+hash table, we ignore it. (Perhaps a preprocessor has made this literal
+obsolete.)
+
+@<Initialize the heap from a file@>=
+{
+  if (true_prob>=1.0) true_prob_thresh=0x80000000;
+  else true_prob_thresh=(int)(true_prob*2147483648.0);
+  for (q=0;;) {
+    register tmp_var *p;
+    if (fscanf(polarity_infile,""O"s",buf)!=1) break;
+    if (buf[0]=='~') i=j=1;
+    else i=j=0;
+    @<Put the variable name...@>;
+    for (p=hash[h];p;p=p->next)
+      if (p->name.lng==cur_tmp_var->name.lng) break;
+    if (p) {
+      v=p->serial+1;
+      o,vmem[v].oldval=i,vmem[v].hloc=q;
+      o,heap[q]=v;
+      o,vmem[v].activity=(vars-q)/(double)vars;
+      o,vmem[v].tloc=0;
+      q++;
+    }
+  }
+  for (v=0;q<vars;q++) {
+    while (o,vmem[++v].tloc==0) ; /* bypass variables already seen */
+    vmem[v].hloc=q;
+    if (true_prob_thresh && (mems+=4,gb_next_rand()<true_prob_thresh))
+      vmem[v].oldval=0;    
+    else vmem[v].oldval=1;
+    o,heap[q]=v;    
+  }
+  hn=vars;
 }
-hn=vars;
 
 @ @<Glob...@>=
 double var_bump=1.0;

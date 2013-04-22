@@ -210,7 +210,7 @@ if (!(erp_file=fopen(erp_file_name,"w"))) {
 
 @*The I/O wrapper. The following routines read the input and absorb it into
 temporary data areas from which all of the ``real'' data structures
-can readily be initialized. My intent is to incorporate these routines in all
+can readily be initialized. My intent is to incorporate these routines into all
 of the SAT-solvers in this series. Therefore I've tried to make the code
 short and simple, yet versatile enough so that almost no restrictions are
 placed on the sizes of problems that can be handled. These routines are
@@ -486,7 +486,7 @@ else {
 
 @ @<Report the successful completion of the input phase@>=
 fprintf(stderr,
-   "("O"lld variables, "O"lld clauses, "O"llu literals successfully read)\n",
+  "("O"lld variables, "O"lld clauses, "O"llu literals successfully read)\n",
                        vars,clauses,cells);
 
 @* SAT preprocessing. This program applies transformations that
@@ -710,7 +710,7 @@ void print_clause(int c) {
     if (!size(c)) return;
     for (k=right(c);!is_cls(k);k=right(k)) {
       l=mem[k].lit;
-      fprintf(stderr," "O"s"O"s",litname(l));
+      fprintf(stderr," "O"s"O".8s",litname(l));
       if (verbose&show_lit_ids) fprintf(stderr,"("O"u)",l);
     }
     fprintf(stderr,"\n");
@@ -738,7 +738,7 @@ void print_clauses_for(int l) {
       fprintf(stderr," "O"s has been eliminated!\n",vmem[thevar(l)].name.ch8);
       return;
     }
-    fprintf(stderr," "O"s"O"s",litname(l));
+    fprintf(stderr," "O"s"O".8s",litname(l));
     if (verbose&show_lit_ids) fprintf(stderr,"("O"u)",l);
     fprintf(stderr," is in");
     for (k=down(l);!is_lit(k);k=down(k))
@@ -749,6 +749,8 @@ void print_clauses_for(int l) {
 
 @ Speaking of debugging, here's a routine to check if the links in |mem|
 have gone awry.
+
+@d sanity_checking 0 /* set this to 1 if you suspect a bug */
 
 @<Sub...@>=
 void sanity(void) {
@@ -1006,7 +1008,7 @@ But we {\it don't\/} attempt to preserve that. Clauses will soon get jumbled.
   if (s==0) {
     w=l;
     if (verbose&show_details)
-      fprintf(stderr,"no input clause contains the literal "O"s"O"s\n",
+      fprintf(stderr,"no input clause contains the literal "O"s"O".8s\n",
                          litname(w));
     @<Set literal |w| to |false| unless it's already set@>;
   }@+else @<Set |litsig(l)|@>;
@@ -1041,7 +1043,7 @@ I assume that it costs four mems to generate 31 new random bits.
   if (s<=1) {
     if (s==0) confusion("empty clause");
     if (verbose&show_details)
-      fprintf(stderr,"clause "O"u is the single literal "O"s"O"s\n",
+      fprintf(stderr,"clause "O"u is the single literal "O"s"O".8s\n",
                                c,litname(w));
     @<Force literal |w| to be true@>;
   }
@@ -1050,17 +1052,20 @@ I assume that it costs four mems to generate 31 new random bits.
 @ Here we assume that |thevar(w)| hasn't already been eliminated.
 A unit clause has arisen, with |w| as its only literal.
 
+A variable might be touched after it has been put into the to-do stack.
+Thus we can't call it stable yet, even though its value won't change.
+
 @<Force literal |w| to be true@>=
 {
   register int k=thevar(w);
   if (w&1) {
     if (o,vmem[k].status==0) {
-      o,vmem[k].status=forced_false,vmem[k].stable=1;
+      o,vmem[k].status=forced_false;
       vmem[k].link=to_do,to_do=k;
     }@+else if (vmem[k].status==forced_true) goto unsat;
   }@+else {
     if (o,vmem[k].status==0) {
-      o,vmem[k].status=forced_true,vmem[k].stable=1;
+      o,vmem[k].status=forced_true;
       vmem[k].link=to_do,to_do=k;
     }@+else if (vmem[k].status==forced_false) goto unsat;
   }
@@ -1073,7 +1078,8 @@ its final occurrence has disappeared.
 
 It's possible that all occurrences of $\bar w$ have already disappeared too.
 In that case (which arises if and only if |thevar(w)| is already
-on the to-do list at this point, and its |status| is nonzero), we just change
+on the to-do list at this point, and its |status| indicates that |w|
+has been forced true), we just change
 the status to |elim_quiet|, because the variable needn't be set either
 true or false.
 
@@ -1081,9 +1087,10 @@ true or false.
 {
   register int k=thevar(w);
   if (o,vmem[k].status==0) {
-    o,vmem[k].status=(w&1? forced_true: forced_false),vmem[k].stable=1;
+    o,vmem[k].status=(w&1? forced_true: forced_false);
     vmem[k].link=to_do,to_do=k;
-  }@+else o,vmem[k].status=elim_quiet,vmem[k].stable=1;
+  }@+else if (vmem[k].status==(w&1? forced_false: forced_true))
+    o,vmem[k].status=elim_quiet,vmem[k].stable=1;
 }
 
 @ @<Allocate the subsidiary arrays@>=
@@ -1092,7 +1099,7 @@ if (!lmem) {
   fprintf(stderr,"Oops, I can't allocate the lmem array!\n");
   exit(-12);
 }
-bytes+=lit_head_top*sizeof(variable);
+bytes+=lit_head_top*sizeof(literal);
 cmem=(clause*)malloc(clauses*sizeof(clause));
 if (!cmem) {
   fprintf(stderr,"Oops, I can't allocate the cmem array!\n");
@@ -1112,12 +1119,13 @@ while (to_do) {
   o,to_do=vmem[k].link;
   if (vmem[k].status!=elim_quiet) {
     l=vmem[k].status==forced_true? pos_lit(k): neg_lit(k);
-    fprintf(erp_file,""O"s"O"s <-0\n",litname(l));
+    fprintf(erp_file,""O"s"O".8s <-0\n",litname(l));
+    o,vmem[k].stable=1;
     @<Delete all clauses that contain |l|@>;
     @<Delete |bar(l)| from all clauses@>;
   }
   vars_gone++;
-  sanity();
+  if (sanity_checking) sanity();
 }
 
 @ @<Delete |bar(l)| from all clauses@>=
@@ -1131,7 +1139,7 @@ for (o,ll=down(bar(l));!is_lit(ll);o,ll=down(ll)) {
   if (j==1) {
     o,w=(p==c? mem[q].lit: mem[p].lit);
     if (verbose&show_details)
-      fprintf(stderr,"clause "O"u reduces to "O"s"O"s\n",c,litname(w));
+      fprintf(stderr,"clause "O"u reduces to "O"s"O".8s\n",c,litname(w));
     @<Force literal |w| to be true@>;
   }
   @<Recompute |clssig(c)|@>;
@@ -1151,7 +1159,7 @@ for (o,ll=down(bar(l));!is_lit(ll);o,ll=down(ll)) {
 for (o,ll=down(l);!is_lit(ll);o,ll=down(ll)) {
   o,c=mem[ll].cls;
   if (verbose&show_details)
-    fprintf(stderr,"clause "O"u is satisfied by "O"s"O"s\n",c,litname(l));
+    fprintf(stderr,"clause "O"u is satisfied by "O"s"O".8s\n",c,litname(l));
   for (o,p=right(c);!is_cls(p);o,p=right(p)) if (p!=ll) {
     o,w=mem[p].lit;
     o,q=up(p),r=down(p);
@@ -1159,7 +1167,7 @@ for (o,ll=down(l);!is_lit(ll);o,ll=down(ll)) {
     oo,occurs(w)--;
     if (occurs(w)==0) {
       if (verbose&show_details)
-        fprintf(stderr,"literal "O"s"O"s no longer appears\n",litname(w));
+        fprintf(stderr,"literal "O"s"O".8s no longer appears\n",litname(w));
       @<Set literal |w| to |false| unless it's already set@>;
     }
   }
@@ -1249,7 +1257,7 @@ while (1) {
     oo,occurs(w)--;
     if (occurs(w)==0) {
       if (verbose&show_details)
-        fprintf(stderr,"literal "O"s"O"s no longer appears\n",litname(q));
+        fprintf(stderr,"literal "O"s"O".8s no longer appears\n",litname(q));
       @<Set literal |w| to |false| unless it's already set@>;
     }
   }
@@ -1276,7 +1284,7 @@ modification. The literal called~|l| above is called~|u| in this program.
     o,u=mem[vv].lit;
     if (specialcase) @<Reject |u| unless it fills special conditions@>;
     if (verbose&show_subtrials)
-      fprintf(stderr," trying to strengthen by "O"u and "O"s"O"s\n",
+      fprintf(stderr," trying to strengthen by "O"u and "O"s"O".8s\n",
              c,litname(u));
     o,ubits=bits&~litsig(u);
     for (o,pp=down(bar(u));!is_lit(pp);o,pp=down(pp)) {
@@ -1314,7 +1322,7 @@ while (1) {
 {
   register ullng ccbits=0;
   if (verbose&show_details)
-    fprintf(stderr,"clause "O"u loses literal "O"s"O"s via clause "O"u\n",
+    fprintf(stderr,"clause "O"u loses literal "O"s"O".8s via clause "O"u\n",
             cc,litname(bar(u)),c);
   for (o,p=right(cc);;o,p=right(p)) {
     o,w=mem[p].lit;
@@ -1325,7 +1333,7 @@ while (1) {
   oo,occurs(w)--;
   if (occurs(w)==0) {
     if (verbose&show_details)
-      fprintf(stderr,"literal "O"s"O"s no longer appears\n",litname(w));
+      fprintf(stderr,"literal "O"s"O".8s no longer appears\n",litname(w));
     @<Set literal |w| to |false| unless it's already set@>;
   }
   o,q=up(p),w=down(p);
@@ -1354,7 +1362,7 @@ if (size(cc)<=1) {
   if (size(cc)==0) confusion("strengthening");
   oo,w=mem[right(cc)].lit;
   if (verbose&show_details)
-    fprintf(stderr,"clause "O"u reduces to "O"s"O"s\n",cc,litname(w));
+    fprintf(stderr,"clause "O"u reduces to "O"s"O".8s\n",cc,litname(w));
   @<Force literal |w| to be true@>;
 }
 
@@ -1684,7 +1692,7 @@ uint last_new; /* the beginning of the last newly resolved clause */
 uint alf,bet; /* loop indices for $\alpha_i$ and $\beta_j$ */
 int clauses_saved; /* eliminating |x| saves at most this many clauses */
 
-@ Too bad: We found more resolvents than then the clauses they would replace.
+@ Too bad: We found more resolvents than the clauses they would replace.
 
 @<Discard the new resolvents and |goto elim_done|@>=
 {
@@ -1697,12 +1705,12 @@ int clauses_saved; /* eliminating |x| saves at most this many clauses */
 
 @ @<Try to eliminate variables@>=
 for (x=vars;x;x--) {
-  sanity();
+  if (sanity_checking) sanity();
   if (o,vmem[x].stable) continue;
   if (vmem[x].status) confusion("touched and eliminated");
   @<Either generate the clauses to eliminate variable |x|...@>;
   @<Eliminate variable |x|, replacing its clauses by the new resolvents@>;
-  sanity();
+  if (sanity_checking) sanity();
   @<Clear the strengthened stack@>;
 elim_done: o,vmem[x].stable=1;
 }
@@ -1731,10 +1739,10 @@ clauses_gone+=clauses_saved;
 @ @<Update the \.{erp} file for the elimination of |x|@>=
 o,k=occurs(l),v=l;
 if (o,k>occurs(ll)) k=occurs(ll),v=ll;
-fprintf(erp_file,""O"s"O"s <-"O"d\n",litname(bar(v)),k);
+fprintf(erp_file,""O"s"O".8s <-"O"d\n",litname(bar(v)),k);
 for (o,p=down(v);!is_lit(p);o,p=down(p)) {
   for (o,q=right(p);q!=p;o,q=right(q))
-    if (!is_cls(q)) o,fprintf(erp_file," "O"s"O"s",litname(mem[q].lit));
+    if (!is_cls(q)) o,fprintf(erp_file," "O"s"O".8s",litname(mem[q].lit));
   fprintf(erp_file,"\n");
 }
 
@@ -1764,7 +1772,7 @@ for (o,p=down(v);!is_lit(p);o,p=down(p)) {
     oo,occurs(w)--,littime(w)=time;
     if (occurs(w)==0) {
       if (verbose&show_details)
-        fprintf(stderr,"literal "O"s"O"s no longer appears\n",litname(w));
+        fprintf(stderr,"literal "O"s"O".8s no longer appears\n",litname(w));
       @<Set literal |w| to |false| unless it's already set@>;
     }
   }      
@@ -1804,7 +1812,7 @@ oo,left(c)=last_new,right(c)=r,left(r)=c;
 if (s==1) {
    o,w=mem[r].lit;
    if (verbose&show_details)
-     fprintf(stderr,"clause "O"u is just "O"s"O"s\n",cc,litname(w));
+     fprintf(stderr,"clause "O"u is just "O"s"O".8s\n",c,litname(w));
    @<Force literal |w| to be true@>;
 }
 
@@ -1813,7 +1821,7 @@ of the intricacies of a plot; the outcome or resolution of a doubtful
 series of occurrences.)
 
 @<Preprocess until everything is stable@>=
-sanity();
+if (sanity_checking) sanity();
 @<Put all clauses into the strengthened stack@>;
 @<Clear the strengthened stack@>;
 for (time=1;;time++) {
@@ -1913,7 +1921,7 @@ for (c=lit_head_top;is_cls(c);c++) if (o,size(c)) {
 for (c=lit_head_top;is_cls(c);c++) if (o,size(c)) {
   for (o,p=right(c);!is_cls(p);o,p=right(p)) {
     o,l=mem[p].lit;
-    printf(" "O"s"O"s",litname(l));
+    printf(" "O"s"O".8s",litname(l));
   }
   printf("\n");
 }
