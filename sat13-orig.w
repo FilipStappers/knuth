@@ -849,9 +849,7 @@ parts of our data structure have gone awry.
 @d sanity_checking 1 /* set this to 0 to avoid sanity checks */
 
 @<Sub...@>=
-void sanity(int eptr, uint location) {
-
-  fprintf(stderr,"sanity("O"u)!\n",location);
+void sanity(int eptr) {
   register uint k,l,c,u,v,clauses,watches,vals,llevel;
   @<Check all clauses for spurious data@>;
   @<Check the watch lists@>;  
@@ -902,7 +900,7 @@ else {
 }    
 
 @ In bad cases this routine will get into a loop. I try to avoid
-segmentation faults, bcktraut not loops.
+segmentation faults, but not loops.
 
 @<Check the watch lists@>=
 for (watches=0,l=2;l<=max_lit;l++) {
@@ -2504,10 +2502,10 @@ are now in place. We just need to set them in motion at the proper times.
 @<Solve the problem@>=
 @<Finish the initialization@>;
 llevel=0;
-if (sanity_checking) sanity(eptr, 0);
+if (sanity_checking) sanity(eptr);
 lptr=0;
 proceed:@+@<Complete the current level, or |goto confl|@>;
-newlevel:@+if (sanity_checking) sanity(eptr,1);
+newlevel:@+if (sanity_checking) sanity(eptr);
 if (eptr==vars) goto satisfied;
 if (delta && (mems>=thresh)) thresh+=delta,print_state(eptr);
 llevel+=2;
@@ -2537,7 +2535,7 @@ confl:@+if (llevel) {
   o,trail[eptr++]=lll;
   o,vmem[thevar(lll)].tloc=lptr; /* |lptr=eptr-1| */
   @<Bump the bumps@>;
-  if (sanity_checking) sanity(eptr,2);
+  if (sanity_checking) sanity(eptr);
   goto proceed;
 }
 if (1) printf("~\n"); /* the formula was unsatisfiable */
