@@ -1039,12 +1039,22 @@ A special |history| array is used to provide these base codes (0, 2, 4, or 6).
 No mems are assessed for maintaining |history|, because it isn't used
 in any decisions taken by the algorithm; it's purely for diagnostic purposes.
 
+The variable |trail_marker| marks a place in the trail that I'm trying
+to study. This subroutine inserts a vertical line at that point, so that
+I can watch where it goes. (Maybe other users might even find it informative
+some day, who knows?)
+
 @<Sub...@>=
+int print_state_cutoff=32*80; /* don't print more than this many hists */
 void print_state(int eptr) {
   register uint j,k;
   fprintf(stderr," after "O"lld mems:",mems);
   for (k=0;k<eptr;k++) {
+    if (k==trail_marker) fprintf(stderr,"|");
     fprintf(stderr,""O"d",history[k]+(trail[k]&1));
+    if (k>=print_state_cutoff) {
+      fprintf(stderr,"...");@+break;
+    }      
   }
   fprintf(stderr,"\n");
   fflush(stderr);
@@ -1625,11 +1635,13 @@ As in other programs of this sequence, the cost of generating
 @d two_to_the_31 ((unsigned long)0x80000000)
 
 @<Choose the next decision literal, |l|@>=
-mems+=4,h=gb_next_rand();
-if (h<rand_prob_thresh) {
-  @<Set |h| to a random integer less than |hn|@>@;
-  o,v=heap[h];
-  if (o,vmem[v].value!=unset) h=0;
+if (rand_prob_thresh) {
+  mems+=4,h=gb_next_rand();
+  if (h<rand_prob_thresh) {
+    @<Set |h| to a random integer less than |hn|@>@;
+    o,v=heap[h];
+    if (o,vmem[v].value!=unset) h=0;
+  }@+else h=0;
 }@+else h=0;
 if (h==0) {
   while (1) {
@@ -2538,18 +2550,20 @@ while (lptr<eptr) {
 }
 
 @ @<Backtrack to |jumplev|@>=
-o,k=leveldat[jumplev+2];
-while (eptr>k) {
-  o,l=trail[--eptr],v=thevar(l);
-  oo,vmem[v].oldval=vmem[v].value;
-  o,vmem[v].value=unset;
-  o,lmem[l].reason=0;
-  if (eptr<lptr && (o,vmem[v].hloc<0)) @<Put |v| into the heap@>;
+{
+  o,k=leveldat[jumplev+2];
+  while (eptr>k) {
+    o,l=trail[--eptr],v=thevar(l);
+    oo,vmem[v].oldval=vmem[v].value;
+    o,vmem[v].value=unset;
+    o,lmem[l].reason=0;
+    if (eptr<lptr && (o,vmem[v].hloc<0)) @<Put |v| into the heap@>;
+  }
+  lptr=eptr;
+  if (sanity_checking) {
+    while (llevel>jumplev) leveldat[llevel]=-1,llevel-=2;
+  }@+else llevel=jumplev;
 }
-lptr=eptr;
-if (sanity_checking) {
-  while (llevel>jumplev) leveldat[llevel]=-1,llevel-=2;
-}@+else llevel=jumplev;
 
 @ @<Print the solution found@>=
 for (k=0;k<vars;k++) {
@@ -2634,9 +2648,10 @@ store_clause:@+if (learned_size==1) @<Stack a unit clause@>@;
       fprintf(stderr,"(learned clause "O"d of size "O"d)\n",c,learned_size);
   }  
 }
-jumplev=0;
+if (recycle_point || unit_stack) jumplev=0;
 @<Backtrack to |jumplev|@>;
 @<Harvest the unit clauses just learned@>;
+trail_marker=eptr;
 @<Bump the bumps@>;    
 if (recycle_point) {
   @<Recycle half of the learned clauses@>;
@@ -2665,19 +2680,36 @@ while (unit_stack) {
   }
 }
 
-@ @<Restart@>=
+@ Instead of restarting completely, by backing up all the way to level~0,
+we follow the advice of van~der~Tak, Ramos, and Heule [{\sl Journal
+on Satisfiability, Boolean Modeling and Computation\/ \bf7} (2011), 133--138]:
+We return to the first level for which a new variable will be infected into
+the trail. (That new variable will be the one with maximum activity, among all
+that are currently unset.) Sometimes that will not require backtracking at all.
+
+@<Restart@>=
 {
   if (verbose&(show_details+show_choices+show_restarts))
     fprintf(stderr,"Restarting ("O"llu conflicts, "O"llu mems)\n",
                      total_learned,mems);
   restart_limit=max_learned; /* temporary for debugging only */
   if (llevel) {
-    jumplev=0;
-    @<Backtrack to |jumplev|@>;
+    while (1) {
+      o,v=heap[0];
+      if (o,vmem[v].value==unset) break;
+      @<Delete |v| from the heap@>;
+    }
+    o,av=vmem[v].activity;
+    for (jumplev=0;jumplev<llevel;jumplev+=2) {
+      oo,v=thevar(trail[leveldat[jumplev+2]]); /* a decision variable */
+      if (o,vmem[v].activity<av) break; /* new guy will replace |v| */
+    }
+    if (jumplev<llevel) @<Backtrack to |jumplev|@>;
   }
+  trail_marker=eptr;
   @<Schedule the next restart@>;
   warmup_cycles=0;
-  goto proceed;
+  goto startup;
 }
 
 @ Well, we didn't solve the problem. Too bad. At least we can report
@@ -2733,5 +2765,6 @@ int warmup_cycles; /* this many warmups have been done since restart */
 int unit_stack; /* pointer to top of stack of newly learned unit clauses */
 int restart_u,restart_v; /* generators for the reluctant doubling sequence */
 int restart_limit; /* what was the earliest clause learned since restart */
+int trail_marker; /* position of the latest restart or full run pass */
 
 @*Index.
