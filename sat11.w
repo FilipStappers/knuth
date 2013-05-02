@@ -270,7 +270,7 @@ typedef union {
   long long lng;
 } octa;
 typedef struct tmp_var_struct {
-  octa name; /* the name (one to seven ASCII characters) */
+  octa name; /* the name (one to eight ASCII characters) */
   uint serial; /* 0 for the first variable, 1 for the second, etc. */
   int stamp; /* |m| if positively in clause |m|; |-m| if negatively there */
   struct tmp_var_struct *next; /* pointer for hash list */
@@ -485,6 +485,7 @@ if (!p) { /* new variable found */
   p=cur_tmp_var++;
   p->next=hash[h], hash[h]=p;
   p->serial=vars++;
+  p->stamp=0;
 }
 
 @ The most interesting aspect of the input phase is probably the ``unwinding''
@@ -727,9 +728,9 @@ a given literal. (Used only when debugging.)
 @<Sub...@>=
 void print_bimp(int l) {
   register uint la,ls;
-  printf("%s%.8s ->",varname(l));
+  printf("%s%.8s ->",litname(l));
   for (la=bimp[l].addr,ls=bimp[l].size;ls;la++,ls--)
-   printf(" %s%.8s",varname(mem[la]));
+   printf(" %s%.8s",litname(mem[la]));
   printf("\n");
 }
 
@@ -738,21 +739,21 @@ void print_bimp(int l) {
 @<Sub...@>=
 void print_timp(int l) {
   register uint la,ls;
-  printf("%s%.8s ->",varname(l));
+  printf("%s%.8s ->",litname(l));
   for (la=timp[l].addr,ls=timp[l].size;ls;la++,ls--)
-   printf(" %s%.8s|%s%.8s",varname(tmem[la].u),varname(tmem[la].v));
+   printf(" %s%.8s|%s%.8s",litname(tmem[la].u),litname(tmem[la].v));
   printf("\n");
 }
 @#
 void print_full_timp(int l) {
   register uint la,k;
-  printf("%s%.8s ->",varname(l));
+  printf("%s%.8s ->",litname(l));
   for (la=timp[l].addr,k=0;k<timp[l].size;k++)
-    printf(" %s%.8s|%s%.8s",varname(tmem[la+k].u),varname(tmem[la+k].v));
+    printf(" %s%.8s|%s%.8s",litname(tmem[la+k].u),litname(tmem[la+k].v));
   if (la+k!=timp[l-1].addr) {
     printf(" #"); /* show also the inactive implicants */
     for (;la+k<timp[l-1].addr;k++)
-      printf(" %s%.8s|%s%.8s",varname(tmem[la+k].u),varname(tmem[la+k].v));
+      printf(" %s%.8s|%s%.8s",litname(tmem[la+k].u),litname(tmem[la+k].v));
   }
   printf("\n");
 }
@@ -815,6 +816,7 @@ the decision was found to be forced while looking ahead for the
 next literal on which to branch.
 
 @<Sub...@>=
+int print_state_cutoff=32*80; /* don't print more than this many hists */
 void print_state(int lev) {
   register int k,r;
   fprintf(stderr," after %lld mems:",mems);
@@ -825,6 +827,9 @@ void print_state(int lev) {
     else fprintf(stderr,"%c",'0'+(rstack[r++]&1)+(nstack[k].branch<<1));
     for (;r<nstack[k+1].lptr;r++)
       fprintf(stderr,"%c",'4'+(rstack[r]&1));
+    if (k>=print_state_cutoff) {
+      fprintf(stderr,"...");@+break;
+    }      
   }
   fprintf(stderr,"\n");
   fflush(stderr);
@@ -851,7 +856,7 @@ typedef struct lit_struct {
 
 @ Similarly, each variable has an entry in |vmem|, where three fields appear.
 
-@d varname(l) (l)&1?"~":"",vmem[thevar(l)].name.ch8 /* used in printouts */
+@d litname(l) (l)&1?"~":"",vmem[thevar(l)].name.ch8 /* used in printouts */
 
 @<Type...@>=
 typedef struct var_struct {
@@ -990,7 +995,7 @@ for (i=j=0;i<2;) {
 }
 u=rstack[0],v=rstack[1],w=rstack[2]; /* see? */
 if (out_file) {
-  for (jj=0;jj<j;jj++) fprintf(out_file," %s%.8s",varname(rstack[jj]));
+  for (jj=0;jj<j;jj++) fprintf(out_file," %s%.8s",litname(rstack[jj]));
   fprintf(out_file,"\n");
 }
 if (j==1) o,forcedlit[forcedlits++]=u;
@@ -1301,7 +1306,7 @@ if (bestlit) {
   tryit: l=bestlit, plevel=level+1;
   if ((verbose&show_choices) && level<=show_choices_max)
     fprintf(stderr,"Level %d%s: %s%.8s (%lld mems)\n",
-            level,nstack[level].branch?"'":"",varname(l),mems);
+            level,nstack[level].branch?"'":"",litname(l),mems);
   @<Update data structures for all consequences of |l|; but
     |goto conflict| if a contradiction arises@>;
 }@+else if ((verbose&show_choices) && level<=show_choices_max)
@@ -1465,7 +1470,7 @@ if (isfixed(l)) {
 }@+else {
   if (verbose&show_details)
     fprintf(stderr,"nearfixing %s%.8s\n",
-       varname(l));
+       litname(l));
   stamptrue(l);
   lfptr=eptr;
   o,rstack[eptr++]=l;
@@ -1478,7 +1483,7 @@ if (isfixed(l)) {
       }@+else {
         if (verbose&show_details)
           fprintf(stderr," nearfixing %s%.8s\n",
-                    varname(lp));
+                    litname(lp));
         stamptrue(lp);
         o,rstack[eptr++]=lp;
       }
@@ -1493,7 +1498,7 @@ becomes fully assigned to truth or falsity at the highest possible level.
 o,stamp[thevar(ll)]=real_truth+(ll&1);
 if (verbose&show_details)
   fprintf(stderr,"fixing %s%.8s\n",
-                    varname(ll));
+                    litname(ll));
 @<Remove |thevar(ll)| from the |freevar| list@>;
 tll=ll&-2;@+@<Swap out inactive ternaries implied by |tll|@>;
 tll++;@+@<Swap out inactive ternaries implied by |tll|@>;
@@ -1501,7 +1506,7 @@ for (o,tla=timp[ll].addr,tls=timp[ll].size;tls;tla++,tls--) {
   o,u=tmem[tla].u, v=tmem[tla].v;
   if (verbose&show_details)
     fprintf(stderr,"  %s%.8s->%s%.8s|%s%.8s\n",
-          varname(ll),varname(u),varname(v));
+          litname(ll),litname(u),litname(v));
   @<Record |thevar(u)| and |thevar(v)| as participants@>;
   @<Update for a potentially new binary clause $u\lor v$@>;
 }
@@ -1699,7 +1704,7 @@ for (o,la=bimp[v].addr,ls=bimp[v].size;ls;la++,ls--) {
     if (o,lmem[w].bstamp!=bstamp) { /* $u\lor w$ is new */
       if (verbose&show_details)
         fprintf(stderr,"   ->%s%.8s|%s%.8s\n",
-              varname(u),varname(w));
+              litname(u),litname(w));
       if (su==ua) resize(bar(u)), ua+=ua, o,au=bimp[bar(u)].addr+su;
       oo,mem[au++]=w,bimp[bar(u)].size=++su; /* $\bar u$ implies $w$ */
       o,aw=bimp[bar(w)].addr,sw=bimp[bar(w)].size;
@@ -1741,7 +1746,7 @@ for (o,la=bimp[u].addr,ls=bimp[u].size;ls;la++,ls--) {
     if (o,lmem[w].bstamp!=bstamp) { /* $v\lor w$ is new */
       if (verbose&show_details)
         fprintf(stderr,"   ->%s%.8s|%s%.8s\n",
-              varname(v),varname(w));
+              litname(v),litname(w));
       if (sv==va) resize(bar(v)), va+=va, o,av=bimp[bar(v)].addr+sv;
       oo,mem[av++]=w,bimp[bar(v)].size=++sv; /* $\bar v$ implies $w$ */
       o,aw=bimp[bar(w)].addr,sw=bimp[bar(w)].size;
@@ -2274,12 +2279,12 @@ if (verbose&show_strong_comps) @<Print the strong components@>;
   fprintf(stderr,"Strong components:\n");
   for (l=settled;l;l=lmem[l].link) {
     fprintf(stderr," %s%.8s ",
-            varname(l));
+            litname(l));
     if (lmem[l].parent!=l) fprintf(stderr,"with %s%.8s\n",
-                  varname(lmem[l].parent));
+                  litname(lmem[l].parent));
     else {
       if (lmem[l].vcomp!=l) fprintf(stderr,"-> %s%.8s ",
-                  varname(lmem[l].vcomp));
+                  litname(lmem[l].vcomp));
       fprintf(stderr,"%.4g\n",
                            rating[thevar(lmem[l].vcomp)]);
     }
@@ -2376,7 +2381,7 @@ o,lmem[bar(l)].arcs=lmem[bar(l)].untagged=p;
   o,lmem[l].parent=0;
   @<Make vertex |v| active@>;
   do @<Explore one step from the current vertex |v|, possibly moving to
-        another current vertex and calling it |v|@>@;
+        another current vertex and calling it~|v|@>@;
   while (v>0);
 }
 
@@ -2385,7 +2390,10 @@ o,lmem[v].rank=++k;
 lmem[v].link=active, active=v;
 o,lmem[v].min=v;
 
-@ @<Explore one step from the current vertex |v|...@>=
+@ Minor point: No mem is charged for setting |lmem[v].min=u| here,
+because |lmem[v].untagged| could have been set at the same time.
+
+@<Explore one step from the current vertex |v|...@>=
 {
   o,vv=lmem[v].untagged,ll=lmem[v].min;
   if (vv>=0) { /* still more to explore from |v| */
@@ -2393,7 +2401,7 @@ o,lmem[v].min=v;
     o,lmem[v].untagged=vv;
     o,j=lmem[u].rank;
     if (j) { /* we've seen |u| already */
-      if (o,j<lmem[ll].rank) o,lmem[v].min=u;
+      if (o,j<lmem[ll].rank) lmem[v].min=u;
             /* nontree arc, just update |v|'s min */
     }@+else { /* |u| is newly seen */
       lmem[u].parent=v; /* a new tree arc goes $v\to u$ */
@@ -2426,10 +2434,10 @@ But we take pains to ensure that |lmem[v].vcomp=bar(lmem[w].vcomp)|.
 {
   float r,rr;
   t=active;
-  o,lmem[v].rank=infty; /* settle |v| */
   o,r=rating[thevar(v)],w=v;
   o,active=lmem[v].link;
-  o,lmem[v].link=settled, settled=t;
+  o,lmem[v].rank=infty; /* settle |v| */
+  lmem[v].link=settled, settled=t;
      /* move the component from |active| to |settled| */
   while (t!=v) {
     if (t==bar(v)) { /* component contains complementary literals */
@@ -2529,7 +2537,7 @@ handle small examples. It doesn't matter if our subforests are crude
 in unusual cases.
 
 @ When the program below begins its work, we will have reduced the
-strong components of the candidate's digraph and placed the component
+strong components of the candidates' digraph and placed the component
 representatives into topological order. That order isn't necessarily
 the one we seek for the oriented forest, but it facilitates the
 computations we need to do. We use it to rank the literals in yet
@@ -2661,7 +2669,7 @@ if (verbose&show_looks) {
                             level);
   for (i=0;i<looks;i++)
     fprintf(stderr," %s%.8s %d\n",
-                    varname(look[i].lit),look[i].offset);
+                    litname(look[i].lit),look[i].offset);
 }
 fl=forcedlits, last_change=-1;
 base=2;
@@ -2711,9 +2719,9 @@ if (isfixed(l)) {
 }@+else {
   if (verbose&show_gory_details) {
     if (cs>=proto_truth) fprintf(stderr,"protofixing %s%.8s\n",
-                                        varname(l));
+                                        litname(l));
     else fprintf(stderr,"%dfixing %s%.8s\n",
-                                        cs,varname(l));
+                                        cs,litname(l));
   }
   stamptrue(l);
   lfptr=eptr;
@@ -2727,9 +2735,9 @@ if (isfixed(l)) {
       }@+else {
         if (verbose&show_gory_details) {
           if (cs>=proto_truth) fprintf(stderr," protofixing %s%.8s\n",
-                                              varname(lp));
+                                              litname(lp));
           else fprintf(stderr," %dfixing %s%.8s\n",
-                                              cs,varname(lp));
+                                              cs,litname(lp));
         }
         stamptrue(lp);
         o,rstack[eptr++]=lp;
@@ -2738,12 +2746,14 @@ if (isfixed(l)) {
   }
 }
 
-@ Here we implement an extension of the classical ``pure literal'' rule:
-If asserting the literal~$l$ causes no contradiction and does not cause any
-clause of length $\ge3$ to become shorter, then we can assume without
-loss of generality that $l$ is true in any satisfying assignment.
-This condition (which I learned from Marijn Heule in January 2013)
-occurs when |looklit| has no weighted new binaries.
+@ An example will make it easier to visualize the current context.
+Suppose the relevant binary clauses are
+$(\bar b\lor a)\land(\bar c\lor a)\land(\bar d\lor c)$.
+Then the |look| array might contain the sequence $\bar b$, $a$, $b$, $c$, $d$,
+$\bar d$, $\bar c$, $\bar a$, with respective offsets 0, 8, 2, 6, 4, 14, 12, 10.
+The parent of~$c$ is then~$a$; the parent of~$d$ is~$c$; the parent of~$\bar c$
+is~$\bar d$; the parent of~$\bar a$ is~$\bar c$; and $a$, $\bar b$, $\bar d$
+are roots with no parent.
 
 @<Look ahead at consequences of |l|, and |goto look_bad| if
          a conflict is found@>=
@@ -2753,20 +2763,75 @@ if (ll) oo,lmem[looklit].wnb=lmem[ll].wnb; /* inherit from parent */
 else o,lmem[l].wnb=0.0;
 if (verbose&show_gory_details)
   fprintf(stderr,"looking at %s%.8s (%d)\n",
-                   varname(looklit),cs);
+                   litname(looklit),cs);
 if (isfixed(l)) {
   if (iscontrary(l) && stamp[thevar(l)]<proto_truth)
     @<Force |looklit| to be (proto) false@>;
 }@+else {
   @<Update lookahead data structures for consequences of |looklit|; but
      |goto contra| if a contradiction arises@>;
-  o,lmem[looklit].wnb+=weighted_new_binaries;
-  if (lmem[looklit].wnb==0) { /* see above */
-    looklit=bar(looklit);
-    @<Force |looklit| to be (proto) false@>;
-  }
+  if (weighted_new_binaries==0) @<Check for an autarky@>@;
+  else o,lmem[looklit].wnb+=weighted_new_binaries;
   @<Do a double lookahead from |looklit|, if that seems advisable@>;
   @<Check for necessary assignments@>;
+}
+
+@ Here we implement an extension of the classical ``pure literal'' rule:
+We have just looked at all the consequences obtainable by repeated propagation
+of unit clauses when |looklit| is assumed to be true, and we've
+found no contradiction. We have also
+discovered no ``new weighted binaries''; this means that, whenever
+we have reduced a clause from size~$s$ to size~$s'<s$ during this process,
+the reduced size $s'$ is~1. (For if $s'=0$ we would have had a contradiction,
+while if $1<s'<s$ we would have increased |new_weighted_binaries|.)
+
+In such a case, the set of literals deducible from |looklit| is said to
+form an {\it autarky}, and we are allowed to assume that |looklit| is
+true. (Indeed, those literals $\{l_1,\ldots,l_k\}$ satisfy every clause that
+contains either $\l_i$ or $\bar l_i$ for any~$i$. If the remaining
+``untouched'' clauses are satisfiable, we can satisfy all the clauses by using
+$\{l_1,\ldots,l_k\}$ in the clauses that are touched; and if we can
+satisfy all the clauses, we can certainly satisfy the untouched ones.)
+
+I learned this trick in January 2013 from Marijn Heule.
+
+@<Check for an autarky@>=
+{
+  if (lmem[looklit].wnb==0) {
+    looklit=bar(looklit);
+    @<Force |looklit| to be (proto) false@>;
+  }@+else {
+    ll=lmem[looklit].parent;
+    @<Make |ll| equivalent to |looklit|@>;
+  }
+}
+
+@ Furthermore, if |lmem[looklit].wnb| is nonzero, we know that we
+set it to |lmem[ll].wnb| where |ll| is the parent of |looklit|.
+In that case, if the assertion of |looklit| gives no new weighted
+new binaries in addition to those obtained from |ll|, the variables
+deducible from |looklit| are an autarky with respect to the
+set of clauses that are reduced by~|ll|; so we are allowed to
+assume that |looklit| itself is implied by~|ll|. In other words,
+adding the additional clause $\lnot\hbox{|ll|}\lor\hbox{|looklit|}$
+does not make the set of clauses any less satisfiable.
+
+We already have the clause $\lnot\hbox{|looklit|}\lor\hbox{|ll|}$,
+because |ll| is the parent of~|looklit|. Thus we can conclude that
+both literals are equivalent in this case.
+
+@<Make |ll| equivalent to |looklit|@>=
+{
+  u=bar(ll);
+  o,au=bimp[ll].addr,su=bimp[ll].size;
+  @<Make sure that |bar(u)| has an |istack| entry@>;
+  if (o,su==bimp[ll].alloc) resize(ll),o,au=bimp[ll].addr;
+  oo,mem[au+su]=looklit,bimp[ll].size=su+1;
+  u=bar(looklit);    
+  o,au=bimp[looklit].addr,su=bimp[looklit].size;
+  @<Make sure that |bar(u)| has an |istack| entry@>;
+  if (o,su==bimp[looklit].alloc) resize(looklit),o,au=bimp[looklit].addr;
+  oo,mem[au+su]=ll,bimp[looklit].size=su+1;
 }
 
 @ @<Force |looklit| to be (proto) false@>=
@@ -2835,7 +2900,7 @@ for (o,tla=timp[ll].addr,tls=timp[ll].size;tls;tla++,tls--) {
   o,u=tmem[tla].u, v=tmem[tla].v;
   if (verbose&show_gory_details)
     fprintf(stderr,"  looking %s%.8s->%s%.8s|%s%.8s\n",
-          varname(ll),varname(u),varname(v));
+          litname(ll),litname(u),litname(v));
   @<Update lookahead structures for a potentially new binary clause $u\lor v$@>;
 }
 
@@ -2875,11 +2940,12 @@ if (wptr) {
     o,mem[la++]=u;
     if (verbose&show_gory_details)
       fprintf(stderr," windfall %s%.8s->%s%.8s\n",
-             varname(looklit),varname(u));
+             litname(looklit),litname(u));
     o,au=bimp[bar(u)].addr,su=bimp[bar(u)].size;
     @<Make sure that |bar(u)| has an |istack| entry@>;
     if (o,su==bimp[bar(u)].alloc) resize(bar(u)),o,au=bimp[bar(u)].addr;
     o,mem[au+su]=bar(looklit);
+    o,bimp[bar(u)].size=su+1;
   }
 }
 
@@ -2905,7 +2971,7 @@ for (o,ola=bimp[bar(looklit)].addr,ols=bimp[bar(looklit)].size;ols;ols--) {
       iscontrary(looklit)) {
     if (verbose&show_gory_details)
       fprintf(stderr," necessary %s%.8s\n",
-                          varname(bar(looklit)));
+                          litname(bar(looklit)));
     @<Force |looklit| to be (proto) false@>;
     o,ola=bimp[bar(old_looklit)].addr; /* guard against a change in |ola| */
   }
@@ -2980,6 +3046,7 @@ uint dl_truth; /* the doublelook analog of |proto_truth| */
 int dlooki; /* the doublelook analog of |looki| */
 uint dlooklit; /* the doublelook analog of |looklit| */
 uint dl_last_change; /* the last literal for which we forced some dl truth */
+int autarky_flag; /* does doublelooking from |dlooklit| detect an autarky? */
 
 @ @<Do a double lookahead from |looklit|, if that seems advisable@>=
 if (level && (o,lmem[looklit].dl_fail!=istamp)) {
@@ -3055,9 +3122,9 @@ if (isfixed(l)) {
 }@+else {
   if (verbose&show_doubly_gory_details) {
     if (cs>=dl_truth) fprintf(stderr,"dlfixing %s%.8s\n",
-                                        varname(l));
+                                        litname(l));
     else fprintf(stderr,"%dfixing %s%.8s\n",
-                                        cs,varname(l));
+                                        cs,litname(l));
   }
   stamptrue(l);
   lfptr=eptr;
@@ -3071,9 +3138,9 @@ if (isfixed(l)) {
       }@+else {
         if (verbose&show_doubly_gory_details) {
           if (cs>=dl_truth) fprintf(stderr," dlfixing %s%.8s\n",
-                                              varname(lp));
+                                              litname(lp));
           else fprintf(stderr," %dfixing %s%.8s\n",
-                                              cs,varname(lp));
+                                              cs,litname(lp));
         }
         stamptrue(lp);
         o,rstack[eptr++]=lp;
@@ -3084,16 +3151,18 @@ if (isfixed(l)) {
 
 @ @<Doublelook ahead at consequences of |l|, and |goto contra| if
          a contradiction is found@>=
+autarky_flag=1;
 dlooklit=l;
 if (verbose&show_doubly_gory_details)
   fprintf(stderr,"dlooking at %s%.8s (%d)\n",
-                   varname(dlooklit),cs);
+                   litname(dlooklit),cs);
 if (isfixed(l)) {
   if (stamp[thevar(l)]<dl_truth && iscontrary(l))
     @<Force |dlooklit| to be (dl) false@>;
 }@+else {
   @<Update dlookahead data structures for consequences of |dlooklit|; but
      |goto dl_contra| if a contradiction arises@>;
+  if (autarky_flag) wstack[wptr++]=bar(dlooklit);
 }
 
 @ The variable |dl_last_change|, which keeps us doublelooking,
@@ -3143,7 +3212,7 @@ for (o,tla=timp[ll].addr,tls=timp[ll].size;tls;tla++,tls--) {
   o,u=tmem[tla].u, v=tmem[tla].v;
   if (verbose&show_doubly_gory_details)
     fprintf(stderr,"  dlooking %s%.8s->%s%.8s|%s%.8s\n",
-          varname(ll),varname(u),varname(v));
+          litname(ll),litname(u),litname(v));
   @<Update dlookahead structures for a potentially
             new binary clause $u\lor v$@>;
 }
@@ -3164,7 +3233,7 @@ if (isfixed(u)) { /* equivalently, |if (o,stamp[thevar(u)]>=cs| */
       l=u;
       @<Propagate binary doublelookahead...@>;
     }
-  }
+  }@+else autarky_flag = 0; /* |u| and |v| both unknown, hence no autarky */
 }
 
 @*Doing it. Finally we just need to put the pieces of this program together.
@@ -3184,8 +3253,8 @@ goto enter_level;
 
 @ @<Print the solution found@>=
 for (k=0;k<rptr;k++) {
-  printf(" %s%.8s",varname(rstack[k]));
-  if (out_file) fprintf(out_file," %s%.8s",varname(bar(rstack[k])));
+  printf(" %s%.8s",litname(rstack[k]));
+  if (out_file) fprintf(out_file," %s%.8s",litname(bar(rstack[k])));
 }
 printf("\n");
 if (freevars) {
@@ -3205,7 +3274,7 @@ void confusion(char *id) { /* an assertion has failed */
 }
 @#
 void debugstop(int foo) { /* can be inserted as a special breakpoint */
-  fprintf(stderr,"You rang?\n");
+  fprintf(stderr,"You rang(%d)?\n",foo);
 }
 
 @*Index.
