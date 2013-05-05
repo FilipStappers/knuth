@@ -1,4 +1,5 @@
 \datethis
+@s cel int
 @s variable int
 @s literal int
 @s mod and
@@ -722,13 +723,12 @@ MiniSAT, which associates a floating-point {\it activity\/}
 score with each variable, and uses a heap to choose the most
 active variable.
 
-Learned clauses also have somewhat analogous activity scores of their own,
-as well as another measure of clause quality devised by Gilles Audemard
+Learned clauses also have a measure of clause quality devised by Gilles Audemard
 and Laurent Simon. The original clauses are static and stay in place,
 but we must periodically decide which of the learned clauses to keep.
 
 @<Glob...@>=
-int *mem; /* master array of clause data */
+cel *mem; /* master array of clause data */
 uint memsize; /* the number of cells allocated for it */
 uint min_learned; /* boundary between original and learned clauses */
 uint first_learned; /* address of the first learned clause */
@@ -756,11 +756,11 @@ beginning of the run, as explained below.
 Longer clauses (and binary clauses that are learned later) are
 represented in a big array |mem| of 32-bit integers. (Entries of |mem|
 are often called ``cells'' in this documentation.) The literals
-of clause~|c| are |mem[c]|, |mem[c+1]|, |mem[c+2]|, etc.;
+of clause~|c| are |mem[c].lit|, |mem[c+1].lit|, |mem[c+2].lit|, etc.;
 the first two of these are ``watching''~$c$. The number of literals,
-|size(c)|, is |mem[c-1]|; and we keep links to other clauses
-being watched by the same literals in |link0(c)=mem[c-2]| and
-|link1(c)=mem[c-3]|.
+|size(c)|, is |mem[c-1].lit|; and we keep links to other clauses
+being watched by the same literals in |link0(c)=mem[c-2].lit| and
+|link1(c)=mem[c-3].lit|.
 
 (Incidentally, this linked structure for watch lists was originally introduced
 in PicoSAT by Armin Biere [{\sl Journal on Satisfiability, Boolean Modeling
@@ -775,22 +775,28 @@ link-containing cells into the cache. I~expect that software to facilitate
 such transformations will be widely available before long.)
 
 If |c| is the current reason for literal |l|, its first literal
-|mem[c]| is always equal to |l|. This condition makes it easy
+|mem[c].lit| is always equal to |l|. This condition makes it easy
 to tell if a given clause plays an important role in the current trail.
 
 A learned clause is identifiable by the condition |c>=min_learned|.
 Such clauses have additional information, 
-|score(c)=mem[c-4]|, which will help us decide whether
+|score(c)=mem[c-4].lit|, which will help us decide whether
 or not to keep them after memory has begun to fill up.
 
-@d size(c) mem[(c)-1]
-@d link0(c) mem[(c)-2]
-@d link1(c) mem[(c)-3]
+@d size(c) mem[(c)-1].lit
+@d link0(c) mem[(c)-2].lit
+@d link1(c) mem[(c)-3].lit
 @d clause_extra 3 /* every clause has a 3-cell preamble */
-@d score(c) mem[(c)-4]
+@d score(c) mem[(c)-4].lit
 @d learned_supplement 1
    /* learned clauses have this many more cells in their preamble */
 @d learned_extra (clause_extra+learned_supplement) /* preamble length */
+
+@<Type...@>=
+typedef union {
+  uint lit;
+  float flt; /* this option is presently unused but reserved for extensions */
+} cel;
 
 @ The variables are numbered from 1 to |n|. The literals corresponding
 to variable~|k| are |k+k| and |k+k+1|, standing respectively for $v$
@@ -861,7 +867,7 @@ void print_watches_for(int l) {
   printf(""O"s"O".8s("O"d) watches",litname(l),l);
   for (c=lmem[l].watch;c;) {
     printf(" "O"u",c);
-    if (mem[c]==l) c=link0(c);
+    if (mem[c].lit==l) c=link0(c);
     else c=link1(c);
   }
   printf("\n");
@@ -878,7 +884,7 @@ void print_clause(uint c) {
     return;
   }
   for (k=0;k<size(c);k++) {
-    l=mem[c+k];
+    l=mem[c+k].lit;
     if (l<2 || l>max_lit) {
       printf(" BAD!\n");
       return;
@@ -917,7 +923,7 @@ for (clauses=k=0,c=clause_extra;c<min_learned;k=c,c+=size(c)+clause_extra) {
   if (size(c)<3)
     fprintf(stderr,"size("O"u)="O"d!\n",c,size(c));
   for (k=0;k<size(c);k++)
-    if (mem[c+k]<2 || mem[c+k]>max_lit)
+    if (mem[c+k].lit<2 || mem[c+k].lit>max_lit)
       fprintf(stderr,"bad lit "O"d of "O"d!\n",k,c);
 }
 if (c!=min_learned)
@@ -936,7 +942,7 @@ else {
     if (size(c)<2)
       fprintf(stderr,"size("O"u)="O"d!\n",c,size(c));
     for (k=0;k<size(c);k++)
-      if (mem[c+k]<2 || mem[c+k]>max_lit)
+      if (mem[c+k].lit<2 || mem[c+k].lit>max_lit)
         fprintf(stderr,"bad lit "O"d of "O"d!\n",k,c);
   }
   if (c!=max_learned)
@@ -954,8 +960,8 @@ for (watches=0,l=2;l<=max_lit;l++) {
       fprintf(stderr,"clause "O"u in watch list "O"u out of range!\n",c,l);
       return;
     }
-    if (mem[c]==l) c=link0(c);
-    else if (mem[c+1]==l) c=link1(c);
+    if (mem[c].lit==l) c=link0(c);
+    else if (mem[c+1].lit==l) c=link1(c);
     else {
       fprintf(stderr,"clause "O"u improperly on watch list "O"u!\n",c,l);
       return;
@@ -999,10 +1005,10 @@ for (k=llevel=0;k<eptr;k++) {
                     litname(l),l,llevel>>1,c);
     }@+else {    
       c=lmem[l].reason;
-      if (mem[c]!=l)
+      if (mem[c].lit!=l)
         fprintf(stderr,""O"s"O".8s("O"u), level "O"u, has wrong reason ("O"u)!\n",
                       litname(l),l,llevel>>1,c);
-      u=bar(mem[c+1]);
+      u=bar(mem[c+1].lit);
       if (vmem[thevar(u)].value!=llevel+(u&1))
         fprintf(stderr,""O"s"O".8s("O"u), level "O"u, has bad reason ("O"u)!\n",
                       litname(l),l,llevel>>1,c);
@@ -1114,12 +1120,12 @@ bytes+=vars*sizeof(uint);
 @ @<Allocate the other main arrays@>=
 free(buf);@+free(hash); /* a tiny gesture to make a little room */
 @<Figure out how big |mem| ought to be@>;
-mem=(int*)malloc(memsize*sizeof(int));
+mem=(cel*)malloc(memsize*sizeof(cel));
 if (!mem) {
   fprintf(stderr,"Oops, I can't allocate the big mem array!\n");
   exit(-10);
 }
-bytes=max_cells_used*sizeof(int);
+bytes=max_cells_used*sizeof(cel);
 max_lit=vars+vars+1;
 lmem=(literal*)malloc((max_lit+1)*sizeof(literal));
 if (!lmem) {
@@ -1188,9 +1194,9 @@ for (c=clause_extra,j=clauses,jj=min_learned+2;j;j--) {
   if (k<=2) @<Do special things for unary and binary clauses@>@;  
   else {
     o,size(c)=k;
-    l=mem[c];
+    l=mem[c].lit;
     ooo,link0(c)=lmem[l].watch, lmem[l].watch=c;
-    l=mem[c+1];
+    l=mem[c+1].lit;
     ooo,link1(c)=lmem[l].watch, lmem[l].watch=c;
     c+=k+clause_extra;
   }
@@ -1220,26 +1226,26 @@ for (i=0;i<2;) {
   i=hack_out(*cur_cell);
   p=hack_clean(*cur_cell)->serial;
   p+=p+(i&1)+2;
-  o,mem[c+k++]=p;
+  o,mem[c+k++].lit=p;
 }
 
 @ @<Do special things for unary and binary clauses@>=
 {
-  if (k<2) @<Define |mem[c]| at level 0@>@;
+  if (k<2) @<Define |mem[c].lit| at level 0@>@;
   else {
-    l=mem[c],ll=mem[c+1]; /* no mem charged for these */
+    l=mem[c].lit,ll=mem[c+1].lit; /* no mem charged for these */
     oo,lmem[bar(l)].bimp_end++;
     oo,lmem[bar(ll)].bimp_end++;
-    o,mem[jj]=l,mem[jj+1]=ll,jj+=2; /* copy the literals temporarily */
+    o,mem[jj].lit=l,mem[jj+1].lit=ll,jj+=2; /* copy the literals temporarily */
   }
 }
 
 @ We have to watch for degenerate cases: Unit clauses in the input
 might be duplicated or contradictory.
 
-@<Define |mem[c]| at level 0@>=
+@<Define |mem[c].lit| at level 0@>=
 {
-  l=mem[c],v=thevar(l);
+  l=mem[c].lit,v=thevar(l);
   if (o,vmem[v].value==unset) {
     o,vmem[v].value=l&1,vmem[v].tloc=eptr;
     o,history[eptr]=4,trail[eptr++]=l;
@@ -1253,7 +1259,7 @@ for (l=2,jj=0;l<=max_lit;l++) {
     o,lmem[l].bimp_start=lmem[l].bimp_end=jj,jj+=k;
 }
 for (jj=min_learned+2,j=binaries;j;j--) {
-  o,l=mem[jj],ll=mem[jj+1],jj+=2;
+  o,l=mem[jj].lit,ll=mem[jj+1].lit,jj+=2;
   ooo,k=lmem[bar(l)].bimp_end,bmem[k]=ll,lmem[bar(l)].bimp_end=k+1;
   ooo,k=lmem[bar(ll)].bimp_end,bmem[k]=l,lmem[bar(ll)].bimp_end=k+1;
 }
@@ -1363,7 +1369,7 @@ While doing this, we swap the first two literals, if necessary, so that
 |bar(lt)| is the second one watching.
 
 Counting of mems is a bit tricky here: If |c| is the address of a clause,
-either |mem[c]| and |mem[c+1]| are in the same octabyte,
+either |mem[c].lit| and |mem[c+1].lit| are in the same octabyte,
 or |link0(c)| and |link1(c)|, but not both. So we make three memory
 references when we're reading from or storing into all four items.
 
@@ -1372,17 +1378,17 @@ references when we're reading from or storing into all four items.
 o,wa=lmem[bar(lt)].watch;
 if (wa) {
   for (q=0;wa;wa=next_wa) {
-    o,ll=mem[wa];
+    o,ll=mem[wa].lit;
     if (ll==bar(lt)) {
-      o,ll=mem[wa+1];
-      oo,mem[wa]=ll,mem[wa+1]=bar(lt);
+      o,ll=mem[wa+1].lit;
+      oo,mem[wa].lit=ll,mem[wa+1].lit=bar(lt);
       o,next_wa=link0(wa);
       o,link0(wa)=link1(wa),link1(wa)=next_wa;
     }@+else o,next_wa=link1(wa);
     @<If clause |wa| is satisfied by |ll|,
           keep |wa| on the watch list and |continue|@>;
     for (o,j=wa+2,jj=wa+size(wa);j<jj;j++) {
-      o,l=mem[j];
+      o,l=mem[j].lit;
       if (o,!isknown(l) || !iscontrary(l)) break;
     }
     if (j<jj) @<Swap |wa| to the watch list of |l| and |continue|@>;
@@ -1396,7 +1402,7 @@ if (wa) {
 {
   if (verbose&show_watches)
     fprintf(stderr," "O"s"O".8s watches "O"d\n",litname(l),wa);
-  oo,mem[wa+1]=l,mem[j]=bar(lt);
+  oo,mem[wa+1].lit=l,mem[j].lit=bar(lt);
   o,link1(wa)=lmem[l].watch;
   o,lmem[l].watch=wa;
   continue;
@@ -1821,12 +1827,12 @@ if (verbose&show_gory_details)
 @ @<Initialize a nonbinary conflict@>=
 {
   o,s=size(c);
-  o,l=bar(mem[c]);
+  o,l=bar(mem[c].lit);
   o,tl=vmem[thevar(l)].tloc;
   o,vmem[thevar(l)].stamp=curstamp;
   @<Bump |l|'s activity@>;
   for (k=c+s-1;k>c;k--) {
-    o,l=bar(mem[k]);
+    o,l=bar(mem[k].lit);
     o,vmem[thevar(l)].stamp=curstamp;
     @<Bump |l|'s activity@>;
     o,j=vmem[thevar(l)].tloc;
@@ -1912,9 +1918,9 @@ if (verbose&show_gory_details)
   fprintf(stderr," ["O"s"O".8s]",litname(l));
 o,c=lmem[l].reason;
 if (c<0) @<Resolve with binary reason@>@;
-else if (c) { /* |l=mem[c]| */
+else if (c) { /* |l=mem[c].lit| */
   for (o,k=c+size(c)-1;k>c;k--) {
-    o,l=bar(mem[k]);
+    o,l=bar(mem[k].lit);
     if (o,vmem[thevar(l)].stamp!=curstamp)
       @<Stamp |l| as part of the conflict clause milieu@>;
   }
@@ -2048,7 +2054,7 @@ if (c<0) { /* binary reason */
   }
 }@+else {
   for (o,k=c+size(c)-1;k>c;k--) {
-    o,l=bar(mem[k]);
+    o,l=bar(mem[k].lit);
     o,s=vmem[thevar(l)].stamp;
     if (s>=curstamp) {
       if (s==curstamp+2) goto clear_stack; /* known non-redundant */
@@ -2161,7 +2167,7 @@ literal's reason.
 
 @<Determine the address, |c|, for the learned clause@>=
 if (prev_learned) {
-  o,l=mem[prev_learned];
+  o,l=mem[prev_learned].lit;
   if (o,lmem[l].reason==0)
     @<Discard clause |prev_learned| if it is subsumed by
            the current learned clause@>;
@@ -2186,7 +2192,7 @@ literals of the learned clause appear among the {\it other\/} literals of
 @<Discard clause |prev_learned| if it is subsumed by...@>=
 {
   for (o,k=size(prev_learned)-1,q=learned_size;q && k>=q;k--) {
-    oo,l=mem[prev_learned+k],r=vmem[thevar(l)].value&-2;
+    oo,l=mem[prev_learned+k].lit,r=vmem[thevar(l)].value&-2;
     if (r<=jumplev) {
       if (trivial_learning) {
         if (o,lmem[l].reason==0) q--;
@@ -2199,16 +2205,16 @@ literals of the learned clause appear among the {\it other\/} literals of
       if (verbose&show_gory_details)
         fprintf(stderr,"(clause "O"d discarded)\n",prev_learned);
       discards++;
-      o,l=mem[prev_learned];
+      o,l=mem[prev_learned].lit;
       @<Remove |prev_learned| from |l|'s watch list@>;
-      o,l=mem[prev_learned+1];
+      o,l=mem[prev_learned+1].lit;
       @<Remove |prev_learned| from |l|'s watch list@>;
   }
 }
 
 @ @<Remove |prev_learned| from |l|'s watch list@>=
 for (o,wa=lmem[l].watch,q=0;wa;q=wa,r=t,wa=next_wa) {
-  o,p=mem[wa];
+  o,p=mem[wa].lit;
   t=(p==l? 0: 1);
   o,next_wa=link0(wa-t);
   if (wa==prev_learned) {
@@ -2222,14 +2228,14 @@ if (wa==0) confusion("discard");
 @ @<Store the learned clause |c|@>=
 size(c)=learned_size;
   /* no mem need be charged here, since we're charging for |link0|, |link1| */
-o,mem[c]=lll;
+o,mem[c].lit=lll;
 oo,link0(c)=lmem[lll].watch;
 o,lmem[lll].watch=c;
 if (trivial_learning) {
   for (j=1,k=jumplev;k;j++,k-=2) {
     oo,l=bar(trail[leveldat[k]]);
     if (j==1) ooo,link1(c)=lmem[l].watch,lmem[l].watch=c;
-    o,mem[c+j]=l;
+    o,mem[c+j].lit=l;
   }
   if (verbose&show_gory_details)
     fprintf(stderr,"(trivial clause is substituted)\n");
@@ -2238,11 +2244,11 @@ if (trivial_learning) {
   if (o,vmem[thevar(l)].stamp==curstamp) { /* not redundant */
     o,r=vmem[thevar(l)].value;
     if (jj && r>=jumplev) {
-      o,mem[c+1]=l;      
+      o,mem[c+1].lit=l;      
       oo,link1(c)=lmem[l].watch;
       o,lmem[l].watch=c;
       jj=0;
-    }@+else o,mem[c+k+jj]=l;
+    }@+else o,mem[c+k+jj].lit=l;
     k++;
   }
 }
@@ -2250,7 +2256,7 @@ if (trivial_learning) {
 @ @<Output |c| to the file of learned clauses@>=
 {
   for (k=c; k<c+learned_size; k++)
-    fprintf(learned_file," "O"s"O".8s",litname(mem[k]));
+    fprintf(learned_file," "O"s"O".8s",litname(mem[k].lit));
   fprintf(learned_file,"\n");
   fflush(learned_file);
 }
@@ -2317,13 +2323,13 @@ this code begins.
 
 @<Compute the scaled score of |c|@>=
 {
-  o,l=mem[c];
+  o,l=mem[c].lit;
   if (o,lmem[l].reason==c) {
     if (o,vmem[thevar(l)].value&-2) o,score(c)=0,asserts++;
     else goto its_true; /* true at root level */
   }@+else {
     for (o,p=q=0,k=c+size(c)-1;k>=c;k--) {
-      oo,l=mem[k],v=vmem[thevar(l)].value;
+      oo,l=mem[k].lit,v=vmem[thevar(l)].value;
       if (v<2) { /* |l| is defined at root level */
         if ((v^l)&1) continue; /* it's false, ignore it */
 its_true: v=buckets+1;@+goto score_set; /* it's true, clause is superfluous */
@@ -2408,12 +2414,12 @@ for (h=0,cc=c=first_learned;c<max_learned;c=jj+learned_extra) {
     }  
   }
   for (kk=cc,k=c;k<jj;k++) {
-    o,l=mem[k];
+    o,l=mem[k].lit;
     o,v=vmem[thevar(l)].value;
     if ((uint)v!=unset) { /* |l| has a permanent value at root level */
       if ((v^l)&1) continue; /* don't copy a permanently false literal */
       break; /* and don't copy a permanently satisfied clause */
-    }@+else o,mem[kk++]=l; /* but do copy otherwise */
+    }@+else o,mem[kk++].lit=l; /* but do copy otherwise */
   }
   if (k<jj) continue; /* reject a satisfied clause */
   h++;@+@<Wrap up clause |cc|@>;
@@ -2425,7 +2431,7 @@ if (verbose&show_recycling+show_recycling_details)
 
 @ At this point we're operating at root level; that is, |llevel=0|.
 And we've just copied the literals of a learned-clause-to-remember
-into positions |mem[cc]|, |mem[cc+1]|, \dots,~|mem[kk-1]|.
+into positions |mem[cc].lit|, |mem[cc+1].lit|, \dots,~|mem[kk-1].lit|.
 
 In rare circumstances the simplifications we've made might result in
 a learned clause of size~1. Or even size~0!
@@ -2438,7 +2444,7 @@ if (kk>=cc+2) {
     o,size(cc)=kk-cc, cc=kk+learned_extra;
 }@+else if (kk==cc) goto unsat;
 else {
-  o,l=mem[cc];
+  o,l=mem[cc].lit;
   o,vmem[thevar(l)].value=l&1,vmem[thevar(l)].tloc=eptr;
   o,history[eptr]=4,trail[eptr++]=l;
   if (verbose&(show_choices+show_details+show_recycling_details))
@@ -2454,13 +2460,13 @@ for (c=first_learned;c<max_learned;o,c+=size(c)+learned_extra)
   @<Watch the first two literals of |c|@>;
 
 @ A technicality for mem counting: We save one memory access either when
-fetching |mem[c+1]| or when storing into |link1(c)|.
+fetching |mem[c+1].lit| or when storing into |link1(c)|.
 
 @<Watch the first two literals of |c|@>=
 {
-  o,l=mem[c];
+  o,l=mem[c].lit;
   ooo,link0(c)=lmem[l].watch,lmem[l].watch=c;
-  l=mem[c+1];
+  l=mem[c+1].lit;
   ooo,link1(c)=lmem[l].watch,lmem[l].watch=c;
 }
 
@@ -2738,7 +2744,7 @@ what progress was made.
       o,fprintf(restart_file," "O"s"O".8s\n",litname(trail[k]));
     for (c=first_learned;c<max_learned;c=kk+learned_extra) {  
       for (o,k=c,kk=c+size(c);k<kk;k++)
-        o,fprintf(restart_file," "O"s"O".8s",litname(mem[k]));
+        o,fprintf(restart_file," "O"s"O".8s",litname(mem[k].lit));
       fprintf(restart_file,"\n");
     }
     fprintf(stderr,"Learned clauses written to file `"O"s'.\n",restart_name);
