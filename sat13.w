@@ -108,7 +108,10 @@ all_done:@+@<Print farewell messages@>;
  output on |stderr|.
 \item{$\bullet$}
 `\.c$\langle\,$positive integer$\,\rangle$' to limit the levels on which
-clauses are shown.
+choices are shown by |show_choices|.
+\item{$\bullet$}
+`\.H$\langle\,$positive integer$\,\rangle$' to limit the literals whose
+histories are shown by |print_state|.
 \item{$\bullet$}
 `\.h$\langle\,$positive integer$\,\rangle$' to adjust the hash table size.
 \item{$\bullet$}
@@ -136,7 +139,7 @@ done after a restart.
 \item{$\bullet$}
 `\.i$\langle\,$positive integer$\,\rangle$' to adjust |restart_base|, the
 minimum number of conflicts between automatically scheduled restarts
-(default 10000).
+(default 10).
 \item{$\bullet$}
 `\.j$\langle\,$integer$\,\rangle$' to adjust |recycle_bump|, the number of
 conflicts before the first recycling pass (default 20000).
@@ -189,7 +192,9 @@ be suitable for restarting after doomsday.
 @d show_recycling_details 64
   /* |verbose| code to display clauses that survive recycling */
 @d show_restarts 128 /* |verbose| code to mention when restarts occur */
-@d show_watches 256 /* |verbose| code to show when a watch list changes */
+@d show_initial_clauses 256
+  /* |verbose| code to list the unsatisfied clauses */
+@d show_watches 512 /* |verbose| code to show when a watch list changes */
 
 @<Process the command line@>=
 for (j=argc-1,k=0;j;j--) switch (argv[j][0]) {
@@ -203,6 +208,7 @@ int random_seed=0; /* seed for the random words of |gb_rand| */
 int verbose=show_basics; /* level of verbosity */
 uint show_choices_max=1000000; /* above this level, |show_choices| is ignored */
 int hbits=8; /* logarithm of the number of the hash lists */
+int print_state_cutoff=32*80; /* don't print more than this many hists */
 int buf_size=1024; /* must exceed the length of the longest input line */
 FILE *out_file; /* file for optional output of a solution-avoiding clause */
 char *out_name; /* its name */
@@ -240,12 +246,12 @@ ullng next_recycle; /* begin recycling when |total_learned| exceeds this */
 ullng recycle_bump=20000; /* interval till the next recycling time */
 ullng recycle_inc=500; /* amount to increase |recycle_bump| after each round */
 ullng next_restart; /* begin to restart when |total_learned| exceeds this */
-ullng restart_base=10000;
-   /* multiplier for intervals between scheduled restarts */
+ullng restart_base=10; /* multiplier for intervals between scheduled restarts */
 
 @ @<Respond to a command-line option, setting |k| nonzero on error@>=
 case 'v': k|=(sscanf(argv[j]+1,""O"d",&verbose)-1);@+break;
 case 'c': k|=(sscanf(argv[j]+1,""O"d",&show_choices_max)-1);@+break;
+case 'H': k|=(sscanf(argv[j]+1,""O"d",&print_state_cutoff)-1);@+break;
 case 'h': k|=(sscanf(argv[j]+1,""O"d",&hbits)-1);@+break;
 case 'b': k|=(sscanf(argv[j]+1,""O"d",&buf_size)-1);@+break;
 case 's': k|=(sscanf(argv[j]+1,""O"d",&random_seed)-1);@+break;
@@ -293,8 +299,8 @@ if (k || hbits<0 || hbits>30 || buf_size<=0 || memk_max<2 || memk_max>31 ||
        trivial_limit<=0 || recycle_inc<0 || alpha<0.0 || alpha>1.0 ||
        rand_prob<0.0 || true_prob<0.0 || var_rho<=0.0) {
   fprintf(stderr,
-     "Usage: "O"s [v<n>] [c<n>] [h<n>] [b<n>] [s<n>] [d<n>] [D<n>]",argv[0]);
-  fprintf(stderr," [m<n>] [t<n>] [w<n>] [i<n>] [j<n>] [J<n>]");
+     "Usage: "O"s [v<n>] [c<n>] [H<n>] [h<n>] [b<n>] [s<n>] [d<n>]",argv[0]);
+  fprintf(stderr," [D<n>] [m<n>] [t<n>] [w<n>] [i<n>] [j<n>] [J<n>]");
   fprintf(stderr," [a<f>] [r<f>] [p<f>] [P<f>]");
   fprintf(stderr," [x<foo>] [l<bar>] [L<baz>] [z<poi>] [Z<poo>] < foo.dat\n");
   exit(-1);
@@ -1051,7 +1057,6 @@ I can watch where it goes. (Maybe other users might even find it informative
 some day, who knows?)
 
 @<Sub...@>=
-int print_state_cutoff=32*80; /* don't print more than this many hists */
 void print_state(int eptr) {
   register uint j,k;
   fprintf(stderr," after "O"lld mems:",mems);
@@ -1085,6 +1090,34 @@ void print_trail(int eptr) {
     else fprintf(stderr,"\n");
   }
 }
+
+@ Here's a diagnostic routine that runs through all the nonbinary,
+nonlearned clauses, printing any that are unsatisfied with respect to the
+current partial assignment of values to variables.
+
+@<Sub...@>=
+void print_unsat(void) {
+  register int c,k,l;
+  for (c=clause_extra;c<min_learned;c+=size(c)+clause_extra) {
+    for (k=c+size(c)-1;k>=c;k--) {
+      l=mem[k].lit;
+      if (isknown(l) && !iscontrary(l)) break;
+    }
+    if (k<c) { /* clause |c| not satisfied */
+      fprintf(stderr,""O"d:",c);
+      for (k=0;k<size(c);k++) {
+        l=mem[c+k].lit;
+        if (!isknown(l)) fprintf(stderr," "O"s"O".8s",litname(l));
+      }
+      fprintf(stderr," |"); /* the remaining literals are false */
+      for (k=0;k<size(c);k++) {
+        l=mem[c+k].lit;
+        if (isknown(l)) fprintf(stderr," "O"s"O".8s",litname(l));
+      }
+      fprintf(stderr,"\n");
+    }
+  }
+}  
 
 @*Initializing the real data structures.
 We're ready now to convert the temporary chunks of data into the
@@ -1434,7 +1467,8 @@ else o,link1(q)=wa;
 q=wa;
 
 @ Well, all literals of clause |wa|, except possibly the first one,
-which is~|ll|. We've already verified that |ll| isn't true.
+did in fact turn out to be false. That first literal is what the
+program calls~|ll|, and we've already verified that |ll| isn't true.
 
 If |ll| is false, we've run into a conflict.
 Otherwise we will force |ll| to be true at the current decision level.
@@ -1497,14 +1531,16 @@ in the even-numbered entries of |conflictdat|. The top of this
 stack is called |conflict_level|.
 
 @<Record a binary conflict@>=
-if (!conflicts_seen++) {
+if (!conflict_seen) {
+  conflict_seen=1;
   o,leveldat[llevel+1]=-l;
   o,conflictdat[llevel+1]=ll;
   conflictdat[llevel]=conflict_level, conflict_level=llevel;
 }
 
 @ @<Record a nonbinary conflict@>=
-if (!conflicts_seen++) {
+if (!conflict_seen) {
+  conflict_seen=1;
   o,leveldat[llevel+1]=wa;
   o,conflictdat[llevel]=conflict_level, conflict_level=llevel;
 }
@@ -1833,20 +1869,9 @@ if (verbose&show_gory_details)
   @<Bump |l|'s activity@>;
   for (k=c+s-1;k>c;k--) {
     o,l=bar(mem[k].lit);
-    o,vmem[thevar(l)].stamp=curstamp;
-    @<Bump |l|'s activity@>;
-    o,j=vmem[thevar(l)].tloc;
+    j=vmem[thevar(l)].tloc; /* |mem| will be charged when fetching |value| */
     if (j>tl) tl=j;
-    j=vmem[thevar(l)].value&-2;
-    if (j>=llevel) xnew++;
-    else if (j) {
-      if (j>jumplev) jumplev=j;
-      o,learn[oldptr++]=bar(l);
-      if (verbose&show_gory_details)
-        fprintf(stderr," "O"s"O".8s",litname(bar(l)));
-      if (o,levstamp[j]<curstamp) o,levstamp[j]=curstamp,clevels++;
-      else if (levstamp[j]==curstamp) o,levstamp[j]=curstamp+1;
-    }
+    @<Stamp |l| as part of the conflict clause milieu@>;
   }
 }
 
@@ -1940,10 +1965,11 @@ else if (c) { /* |l=mem[c].lit| */
   o,j=vmem[thevar(l)].value&-2;
   if (j>=llevel) xnew++;
   else if (j) {
-    if (j>=jumplev) jumplev=j;
+    if (j>jumplev) jumplev=j;
     o,learn[oldptr++]=bar(l);
     if (verbose&show_gory_details)
-      fprintf(stderr," "O"s"O".8s",litname(bar(l)));
+      fprintf(stderr," "O"s"O".8s{"O"d}",
+               litname(bar(l)),vmem[thevar(l)].value>>1);
     if (o,levstamp[j]<curstamp) o,levstamp[j]=curstamp,clevels++;
     else if (levstamp[j]==curstamp) o,levstamp[j]=curstamp+1;
   }
@@ -2137,10 +2163,11 @@ on the active level, and it will be one of the watchers we need.
 All other literals in the learned clause are currently false. We must
 choose one of those on the highest level (furthest from root level)
 to be a watcher. For if we don't, backtracking might take us to
-a lower level on which the clause becomes forcing, yet we don't
-see that fact --- we're not watching it! (The true literal and
-an unwatched literal become unassigned. Then, if the unwatched literal
-becomes false, we don't notice that the formerly true literal
+a lower level on which the clause becomes forcing, yet we won't
+see that fact --- we won't be watching it! (The true literal and
+an unwatched literal become unassigned during backtracking.
+Then, if the unwatched literal
+becomes false, we won't notice that the formerly true literal
 is now forced true again.)
 
 @<Learn the simplified clause@>=
@@ -2149,11 +2176,6 @@ is now forced true again.)
   @<Store the learned clause |c|@>;
   prev_learned=c;
   if (learned_file) @<Output |c| to the file of learned clauses@>;
-  if (verbose&(show_details+show_choices)) {
-    if ((verbose&show_details) || llevel<=show_choices_max)
-      fprintf(stderr,"level "O"d, "O"s"O".8s from "O"d\n",
-         jumplev>>1,litname(lll),c);
-  }
 }
 
 @ In early runs of this program, I noticed several times when the previously
@@ -2168,7 +2190,7 @@ literal's reason.
 @<Determine the address, |c|, for the learned clause@>=
 if (prev_learned) {
   o,l=mem[prev_learned].lit;
-  if (o,lmem[l].reason==0)
+  if ((o,lmem[l].reason==0) && (o,vmem[thevar(l)].value==unset))
     @<Discard clause |prev_learned| if it is subsumed by
            the current learned clause@>;
 }
@@ -2184,7 +2206,7 @@ if (max_learned>max_cells_used) {
   }
 }
 
-@ The first literal of |prev_learned| was true at its level, so it isn't
+@ The first literal of |prev_learned| has no set value, so it isn't
 part of the conflict clause. We will discard |prev_learned| if all
 literals of the learned clause appear among the {\it other\/} literals of
 |prev_learned|.
@@ -2478,10 +2500,12 @@ are now in place. We just need to set them in motion at the proper times.
 @<Finish the initialization@>;
 llevel=warmup_cycles=0;
 if (sanity_checking) sanity(eptr);
+if (verbose&show_initial_clauses) print_unsat();
 lptr=0;
 startup: conflict_level=0;
 full_run=(warmup_cycles<warmups?1:0);
-proceed:@+@<Complete the current level, or |goto confl|@>;
+proceed: conflict_seen=0;
+@<Complete the current level, or |goto confl|@>;
 newlevel:@+if (sanity_checking) sanity(eptr);
 if (delta && (mems>=thresh)) thresh+=delta,print_state(eptr);
 if (eptr==vars) {
@@ -2489,9 +2513,11 @@ if (eptr==vars) {
   @<Finish a full run@>;
   goto startup;
 }
-if (total_learned>=doomsday) @<Call it quits@>;
-if (total_learned>=next_recycle) full_run=1;
-else if (total_learned>=next_restart) @<Restart@>;
+if (!conflict_level) { /* no conflicting literals are on the trail */
+   if (total_learned>=doomsday) @<Call it quits@>;
+   if (total_learned>=next_recycle) full_run=1;
+   else if (total_learned>=next_restart) @<Restart@>;
+}
 llevel+=2;
 @<Choose the next decision...@>;
 if (verbose&show_choices && llevel<=show_choices_max)
@@ -2504,7 +2530,6 @@ o,leveldat[llevel]=eptr;
 o,trail[eptr++]=l;
 o,vmem[thevar(l)].tloc=lptr; /* |lptr=eptr-1| */
 vmem[thevar(l)].value=llevel+(l&1);
-conflicts_seen=0;
 goto proceed;
 @<Resolve the current conflict@>;
 
@@ -2518,26 +2543,32 @@ prep_clause:@+@<Deal with the conflict clause |c|@>;
   @<Backtrack to |jumplev|@>;
   if (learned_size>1) {
     @<Learn the simplified clause@>@;
-    o,vmem[thevar(lll)].value=jumplev+(lll&1);
+    if (verbose&(show_details+show_choices)) {
+      if ((verbose&show_details) || llevel<=show_choices_max)
+        fprintf(stderr,"level "O"d, "O"s"O".8s from "O"d\n",
+           llevel>>1,litname(lll),c);
+    }
     o,lmem[lll].reason=c;
   }@+else @<Learn a clause of size 1@>;
+  o,vmem[thevar(lll)].value=llevel+(lll&1),vmem[thevar(lll)].tloc=eptr;
   history[eptr]=(decisionvar? 2: 6);
   o,trail[eptr++]=lll;
-  o,vmem[thevar(lll)].tloc=lptr; /* |lptr=eptr-1| */
   @<Bump the bumps@>;
   if (sanity_checking) sanity(eptr);
   goto proceed;
 }
-unsat:@+if (1) printf("~\n"); /* the formula was unsatisfiable */
-else {
-satisfied: @<Print the solution found@>;
+unsat:@+if (1) {
+  printf("~\n"); /* the formula was unsatisfiable */
+  if (verbose&show_basics) fprintf(stderr,"UNSAT\n");
+}@+else {
+satisfied:@+if (verbose&show_basics) fprintf(stderr,"!SAT!\n");
+  @<Print the solution found@>;
 }
 
 @ @<Learn a clause of size 1@>=
 {
   if (verbose&(show_details+show_choices))
     fprintf(stderr,"level 0, learned "O"s"O".8s\n",litname(lll));
-  o,vmem[thevar(lll)].value=lll&1;
   if (learned_file) fprintf(learned_file," "O"s"O".8s\n",litname(lll));
 }
 
@@ -2613,15 +2644,10 @@ if (next_recycle>doomsday) next_recycle=doomsday;
 @ After a full cycle has assigned values to all the variables,
 we go back and learn clauses from each of the recorded conflicts.
 
-If we're lucky, we actually will learn a unit clause during this
-process. Such literals will become true at level~0, after we have
-backtracked all the way to that level. Meanwhile we save them
-on a stack, kept within the |conflictdat| array and
-accessed via |unit_stack|.
-
-Trivial clauses that arise during a full run are ignored, unless they are
-on the first conflict level, because they are almost certainly of little
-interest at higher levels.
+If clause $c_i$ is learned at level $l_i$, it tells us that some literal~$u_i$
+that was set false at~$l_i$ can now be set to true at some previous level
+$l'_i<l_i$. We want to backtrack to the minimum of those levels $l'_i$, which
+we'll call |minjumplev|. 
 
 @<Finish a full run@>=
 if (total_learned>=next_recycle) {
@@ -2636,28 +2662,14 @@ if (total_learned>=next_recycle) {
     fprintf(stderr,"Finishing warmup round "O"d:\n",warmup_cycles);
 }
 o,leveldat[llevel+2]=eptr;
-unit_stack=0;
-for (;conflict_level;) {
-  o,jumplev=conflict_level,conflict_level=conflictdat[conflict_level];
-  @<Backtrack to |jumplev|@>;
-  o,c=leveldat[llevel+1];
-  if (c<0) o,l=-c,ll=conflictdat[llevel+1];
-  goto prep_clause;
-  /* apology: these |goto|'s are because of |goto|'s in simplification */
-store_clause:@+if (learned_size==1) @<Stack a unit clause@>@;
-  else if (trivial_learning && conflict_level) {
-      cells_prelearned-=prelearned_size;
-      cells_learned-=learned_size,total_learned--,trivials--;
-  }@+else {
-    @<Learn the simplified clause@>;
-    if (verbose&show_warmlearn)
-      fprintf(stderr,"(learned clause "O"d of size "O"d)\n",c,learned_size);
-  }  
-}
-if (recycle_point || unit_stack) jumplev=0;
+minjumplev=max_lit; /* an ``infinite'' level */
+for (;conflict_level;) @<Learn from the conflict at |conflict_level|@>;
+if (recycle_point) jumplev=0;
+else jumplev=minjumplev;
 @<Backtrack to |jumplev|@>;
-@<Harvest the unit clauses just learned@>;
 trail_marker=eptr;
+if (jumplev==minjumplev)
+  @<Place the literals learned at |minjumplev| at the end of the trail@>;
 @<Bump the bumps@>;    
 if (recycle_point) {
   @<Recycle half of the learned clauses@>;
@@ -2665,31 +2677,67 @@ if (recycle_point) {
   @<Schedule the next recycling pass@>;
 }
 
-@ @<Stack a unit clause@>=
+@ Trivial clauses that arise during a full run are ignored, unless they are
+on the first conflict level, because they are never applicable
+at higher levels.
+
+Several different literals $u_i$ might all turn to be learned at
+|minjumplev|. Therefore we keep track of them on a stack within the
+|conflictdat| array. The top item on this stack is accessed via |next_learned|.
+
+@<Learn from the conflict at |conflict_level|@>=
 {
-  if (verbose&(show_choices+show_details+show_gory_details+show_warmlearn))
-    fprintf(stderr," level 0, learned "O"s"O".8s\n",litname(lll));
-  o,conflictdat[llevel]=unit_stack,conflictdat[llevel+1]=lll;
-  if (learned_file) fprintf(learned_file," "O"s"O".8s\n",litname(lll));
-  unit_stack=llevel;
+  o,jumplev=conflict_level,conflict_level=conflictdat[conflict_level];
+  @<Backtrack to |jumplev|@>;
+  o,c=leveldat[llevel+1];
+  if (c<0) o,l=-c,ll=conflictdat[llevel+1];
+  goto prep_clause;
+store_clause:@+
+   /* apology: these |goto|'s are because of |goto|'s in simplification */
+   /* now |lll| is a false literal that will become true at |jumplev| */
+  if (trivial_learning && conflict_level) {
+      cells_prelearned-=prelearned_size;
+      cells_learned-=learned_size,total_learned--,trivials--;
+  }@+else {
+    if (jumplev<=minjumplev) {
+      if (jumplev < minjumplev) minjumplev=jumplev, next_learned=0;
+      o,conflictdat[llevel]=next_learned, conflictdat[llevel+1]=lll;
+      next_learned=llevel;
+    }
+    if (learned_size==1) {
+      o,leveldat[llevel+1]=0;
+      if (learned_file) fprintf(learned_file," "O"s"O".8s\n",litname(lll));
+      if (verbose&show_warmlearn)
+        fprintf(stderr,"(learned unit clause "O"s"O".8s)\n",litname(lll));
+    }@+else  {
+      @<Learn the simplified clause@>;
+      o,leveldat[llevel+1]=c;
+      if (verbose&show_warmlearn)
+        fprintf(stderr,"(learned clause "O"d of size "O"d)\n",c,learned_size);
+    }
+  }
 }
 
-@ @<Harvest the unit clauses just learned@>=
-while (unit_stack) {
-  o,lll=conflictdat[unit_stack+1];
-  unit_stack=conflictdat[unit_stack];
-  if (o,vmem[thevar(lll)].value!=unset) { /* already defined at root level */
-    if (vmem[thevar(lll)].value!=(lll&1)) goto unsat;
-  }@+else {
-   o,vmem[thevar(lll)].value=lll&1,vmem[thevar(lll)].tloc=eptr;
-   o,history[eptr]=4,trail[eptr++]=lll;
-  }
+@ @<Place the literals learned at |minjumplev| at the end of the trail@>=
+while (next_learned) {
+  o,lll=conflictdat[next_learned+1];
+  o,c=leveldat[next_learned+1];
+  next_learned=conflictdat[next_learned];
+  if (verbose&(show_details+show_choices)) {
+    if ((verbose&show_details) || llevel<=show_choices_max)
+      if (c) fprintf(stderr,"level "O"d, "O"s"O".8s from "O"d\n",
+           llevel>>1,litname(lll),c);
+      else fprintf(stderr,"level 0, "O"s"O".8s\n",litname(lll));
+    }
+  o,vmem[thevar(lll)].value=llevel+(lll&1),vmem[thevar(lll)].tloc=eptr;
+  o,lmem[lll].reason=c;
+  o,history[eptr]=4,trail[eptr++]=lll;
 }
 
 @ Instead of restarting completely, by backing up all the way to level~0,
 we follow the advice of van~der~Tak, Ramos, and Heule [{\sl Journal
 on Satisfiability, Boolean Modeling and Computation\/ \bf7} (2011), 133--138]:
-We return to the first level for which a new variable will be infected into
+We return to the first level for which a new variable will be injected into
 the trail. (That new variable will be the one with maximum activity, among all
 that are currently unset.) Sometimes that will not require backtracking at all.
 
@@ -2747,7 +2795,8 @@ what progress was made.
         o,fprintf(restart_file," "O"s"O".8s",litname(mem[k].lit));
       fprintf(restart_file,"\n");
     }
-    fprintf(stderr,"Learned clauses written to file `"O"s'.\n",restart_name);
+    fprintf(stderr,"Current learned clauses written to file `"O"s'.\n",
+                           restart_name);
   }
   goto all_done;
 }
@@ -2764,13 +2813,14 @@ void debugstop(int foo) { /* can be inserted as a special breakpoint */
 
 @ @<Glob...@>=
 int full_run; /* are we making a pass to gather data on all variables? */
-int conflicts_seen; /* how many conflict have we seen at the current level? */
+int conflict_seen; /* have we seen a conflict at the current level? */
 int decisionvar; /* does the learned clause involve the decision literal? */
 int prev_learned; /* number of the clause most recently learned */
 int warmup_cycles; /* this many warmups have been done since restart */
-int unit_stack; /* pointer to top of stack of newly learned unit clauses */
+int next_learned; /* top of stack of literals learned at |minjumplev| */
 int restart_u,restart_v; /* generators for the reluctant doubling sequence */
 int restart_limit; /* what was the earliest clause learned since restart */
 int trail_marker; /* position of the latest restart or full run pass */
+int minjumplev; /* level to which we'll return after a full run */
 
 @*Index.
